@@ -8,7 +8,7 @@ import { demoTriage, demoDeepAnalysis } from './demo.js';
 import { saveAnalysis, listAnalyses, removeAnalysis, historyMode } from './history.js';
 import { truncateForDevice } from './redact.js';
 import { SAMPLES } from './samples.js';
-import { $, toast, setPill, setBadge, renderStage1, renderVerdict, renderRisk, renderTactics, renderDeep, renderHistory, fmtMs } from './ui.js';
+import { $, toast, setPill, setBadge, renderStage1, renderVerdict, renderRisk, renderTactics, renderDeep, renderHistory, fmtMs, icon } from './ui.js';
 
 const S = {
   mode: 'scam',
@@ -283,13 +283,13 @@ async function analyze() {
         deep = r.text;
         $('s2Latency').textContent = fmtMs(r.ms);
         setBadge($('s2Badge'), 'IN_CLOUD', 'cloud');
-        $('s2Body').innerHTML = `<p>✅ ${rc.cloud_model} · redacted input · ${s1.redactedText.length} chars, 0 raw PII.</p>`;
+        $('s2Body').innerHTML = `<p>${icon('check', 15)} ${rc.cloud_model} · redacted input · ${s1.redactedText.length} chars, 0 raw PII.</p>`;
         engines.s2 = `${rc.cloud_model} (${fmtMs(r.ms)})`;
       } catch (e) {
         const fe = friendlyError(e);
         console.warn('[stage2] failed:', e);
         setBadge($('s2Badge'), 'DEMO', 'demo');
-        $('s2Body').innerHTML = `<p>⚠️ Cloud failed (${fe.title}). ${fe.hint}</p>`;
+        $('s2Body').innerHTML = `<p>${icon('warn', 15)} Cloud failed (${fe.title}). ${fe.hint}</p>`;
         deep = demoDeepAnalysis(S.mode, s1);
         engines.s2 = `demo engine — ${fe.title}`;
       }
@@ -300,7 +300,7 @@ async function analyze() {
       engines.s2 = 'demo engine';
     } else {
       setBadge($('s2Badge'), 'SKIPPED', 'idle');
-      $('s2Body').innerHTML = '<p>🔒 Skipped — maximum-privacy mode. Raw text never left your device.</p>';
+      $('s2Body').innerHTML = `<p>${icon('lock', 15)} Skipped — maximum-privacy mode. Raw text never left your device.</p>`;
       deep = '## Maximum-privacy mode\nCloud deep-analysis is off, so nothing left your device. The on-device verdict, risk score, and flags above are your full result.\n\nToggle **Cloud deep-analysis** on to get the deep breakdown — it still only receives redacted text.';
       engines.s2 = 'skipped (privacy mode)';
     }

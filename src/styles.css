@@ -189,3 +189,16 @@ footer p { max-width: 900px; margin: 0 auto; }
 .link:hover { text-decoration: underline; }
 .signed-box { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
 .signed-box p { margin: 0; flex: 1; }
+
+.ic { vertical-align: -3px; }
+.v-icon { display: inline-grid; place-items: center; }
+.v-icon .ic { vertical-align: 0; }
+.dot .ic { vertical-align: -4px; }
+.tab .ic { vertical-align: -3px; margin-right: 2px; }
+.mini-verdict .ic { vertical-align: -3px; }
+.btn.google {
+  background: #fff; color: #1f1f1f; border: 1px solid #747775; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn.google:hover { background: #f2f2f2; border-color: #1f1f1f; }
+.btn.google .ic { vertical-align: 0; }
