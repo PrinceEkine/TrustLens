@@ -278,7 +278,7 @@ async function analyze() {
         $('s2Body').innerHTML = '<p class="muted">Streaming deep-analysis (redacted text only)…</p>';
         $('deep').innerHTML = '<p class="muted">Streaming…</p>';
         const r = await runStage2Stream(S.mode, s1.redactedText, s1, (_p, full) => {
-          $('deep').innerHTML = renderDeep(full + ' ▍');
+          $('deep').innerHTML = renderDeep(full) + '<span class="stream-caret"></span>';
         });
         deep = r.text;
         $('s2Latency').textContent = fmtMs(r.ms);
