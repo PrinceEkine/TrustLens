@@ -49,6 +49,8 @@ export function getModels() {
         createOptions: {
           expectedInputs: [{ type: 'text', languages: ['en'] }],
           expectedOutputs: [{ type: 'text', languages: ['en'] }],
+          // Newer Chrome Prompt API shape; passed through when supported, ignored otherwise.
+          outputLanguage: 'en',
         },
       },
     });
@@ -177,6 +179,9 @@ export function friendlyError(e) {
   if (/unavailable|not available|no model|download|DEVICE_MODEL/i.test(msg)) return { title: 'On-device model unavailable', hint: 'Use Chrome Desktop 139+ with chrome://flags/#prompt-api-for-gemini-nano-multimodal-input enabled. Falling back to labeled cloud triage.' };
   if (/app.?check|attestat|403/i.test(msg)) return { title: 'App Check blocked the request', hint: 'Register your debug token (DevTools console) under App Check > Apps > Manage debug tokens.' };
   if (/429|quota|exhausted|RESOURCE_EXHAUSTED/i.test(msg)) return { title: 'Cloud quota exhausted', hint: 'On-device results above are still valid. Retry the cloud stage later.' };
-  if (/network|fetch|offline|Failed to fetch/i.test(msg)) return { title: 'Network unreachable', hint: 'On-device stage works offline; the cloud stage needs connectivity.' };
+  if (/\b404\b|not found|no longer available|unknown model|MODEL_NOT_FOUND/i.test(msg)) return { title: 'Cloud model unavailable', hint: 'The cloud model name was rejected (retired or misspelled). Update cloud_model in code/Remote Config — see README.' };
+  if (/\b50[023]\b|overload|high demand|deadline|timeout|abort/i.test(msg)) return { title: 'Cloud overloaded', hint: 'Google’s AI servers are busy (transient 5xx/timeout). Wait ~1 min and re-run — nothing on your side is broken.' };
+  if (/Failed to fetch|network request failed|NetworkError|ERR_NETWORK|ERR_INTERNET_DISCONNECTED|offline/i.test(msg)) return { title: 'Network unreachable', hint: 'On-device stage works offline; the cloud stage needs connectivity.' };
+  if (/vertexai|API.*not enabled|has not been used|enable this API|SERVICE_DISABLED/i.test(msg)) return { title: 'AI Logic API not enabled', hint: 'Console → AI Services → AI Logic → Get started (Gemini Developer API), or enable firebasevertexai.googleapis.com for your project. Wait ~2 min, retry.' };
   return { title: 'AI request failed', hint: msg.slice(0, 180) };
 }

@@ -1,9 +1,10 @@
-// Smoke tests for the DOM-free modules (redact.js, demo.js).
+// Smoke tests for the DOM-free modules (redact.js, demo.js, ai.js error map).
 // Run: npm run smoke
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { prescrub, safeJsonParse, escapeHtml, renderLiteMarkdown, truncateForDevice } from '../src/redact.js';
 import { demoTriage, demoDeepAnalysis } from '../src/demo.js';
+import { friendlyError } from '../src/ai.js';
 
 const RC = { risk_high: 70, risk_medium: 35 };
 
@@ -60,5 +61,41 @@ describe('demo.js fallback engine', () => {
     const md = demoDeepAnalysis('scam', s1);
     assert.ok(md.includes('## Verdict') && md.includes('## What to do next'));
     assert.ok(md.includes('Advance fee') || md.includes('Reply pressure'));
+  });
+});
+
+describe('ai.js friendlyError', () => {
+  test('retired cloud model (404) is not mislabeled as a network failure', () => {
+    const err = 'FirebaseError: AI: Error fetching from https://firebasevertexai.googleapis.com/v1beta/projects/trustlens-d6fbb/models/gemini-2.5-flash:generateContent: [404 ] This model models/gemini-2.5-flash is no longer available to new users. (AI/fetch-error)';
+    const fe = friendlyError(new Error(err));
+    assert.equal(fe.title, 'Cloud model unavailable');
+    assert.ok(fe.hint.includes('cloud_model'));
+  });
+
+  test('genuine transport failure still maps to Network unreachable', () => {
+    assert.equal(friendlyError(new TypeError('Failed to fetch')).title, 'Network unreachable');
+    assert.equal(friendlyError(new Error('FirebaseError: AI: Error fetching from https://x: Failed to fetch')).title, 'Network unreachable');
+  });
+
+  test('disabled AI Logic API still maps to its own fix', () => {
+    const err = "AI: The Firebase AI SDK requires the Firebase AI API ('firebasevertexai.googleapis.com') to be enabled in your Firebase project. (AI/api-not-enabled)";
+    assert.equal(friendlyError(new Error(err)).title, 'AI Logic API not enabled');
+  });
+
+  test('cloud overload (503/500) maps to retry, not API-not-enabled', () => {
+    const e503 = 'FirebaseError: AI: Error fetching from https://firebasevertexai.googleapis.com/v1beta/projects/p/models/m:generateContent: [503 ] Deadline expired before operation could complete. (AI/fetch-error)';
+    const e500 = 'FirebaseError: AI: Error fetching from https://firebasevertexai.googleapis.com/v1beta/projects/p/models/m:streamGenerateContent?alt=sse: [500 ] This model is currently experiencing high demand. (AI/fetch-error)';
+    assert.equal(friendlyError(new Error(e503)).title, 'Cloud overloaded');
+    assert.equal(friendlyError(new Error(e500)).title, 'Cloud overloaded');
+  });
+
+  test('cloud timeout maps to retry', () => {
+    const fe = friendlyError({ name: 'AbortError', message: 'Timeout has expired.' });
+    assert.equal(fe.title, 'Cloud overloaded');
+  });
+
+  test('on-device unavailability still maps to the Nano fix', () => {
+    const err = 'FirebaseError: AI: Local LanguageModel API not available in this environment. (AI/api-not-enabled)';
+    assert.equal(friendlyError(new Error(err)).title, 'On-device model unavailable');
   });
 });

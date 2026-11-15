@@ -12,7 +12,7 @@ import { getAI, GoogleAIBackend } from 'firebase/ai';
 const env = import.meta.env;
 
 export const RC_DEFAULTS = {
-  cloud_model: 'gemini-2.5-flash',
+  cloud_model: 'gemini-3.8-flash',
   risk_high: 70,
   risk_medium: 35,
   max_input_chars: 6000,
