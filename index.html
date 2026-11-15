@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="TrustLens — see through scams and fine print. On-device AI triage keeps your data private; the cloud only ever sees redacted text." />
+  <meta name="theme-color" content="#0b1220" />
+  <title>TrustLens — Private-first AI trust advisor</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%2334d399' d='M16 2l12 5v8c0 7-5.1 12.4-12 15C9.1 27.4 4 22 4 15V7z'/%3E%3Ccircle cx='16' cy='15' r='5.5' fill='%230b1220'/%3E%3Ccircle cx='16' cy='15' r='2.2' fill='%2334d399'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./src/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2l12 5v8c0 7-5.1 12.4-12 15C9.1 27.4 4 22 4 15V7z" fill="#34d399"/><circle cx="16" cy="15" r="5.5" fill="#0b1220"/><circle cx="16" cy="15" r="2.2" fill="#34d399"/></svg>
+      <div>
+        <h1>TrustLens</h1>
+        <p class="tagline">See through scams &amp; fine print — privately.</p>
+      </div>
+    </div>
+    <div class="status">
+      <span class="pill" id="pillNano" title="Gemini Nano on-device model (Chrome Prompt API)">Nano: …</span>
+      <span class="pill" id="pillNet" title="Network connectivity">Net: …</span>
+      <span class="pill" id="pillCloud" title="Cloud deep-analysis stage">Cloud: …</span>
+      <span class="pill" id="pillAppCheck" title="Firebase App Check attestation">Shield: …</span>
+      <button class="btn ghost small" id="authBtn">Sign in</button>
+      <button class="btn ghost small" id="historyBtn" aria-label="Open history">History</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="card input-card" aria-label="Input">
+      <div class="tabs" role="tablist">
+        <button class="tab active" id="tabScam" role="tab" aria-selected="true">🛡️ Scam Shield</button>
+        <button class="tab" id="tabFine" role="tab" aria-selected="false">🔍 Fine-Print X-ray</button>
+      </div>
+      <p class="mode-desc" id="modeDesc"></p>
+      <div class="samples" id="samples" aria-label="Try a sample"></div>
+      <label class="field-label" for="input">Paste the message, email, or clause</label>
+      <textarea id="input" rows="8" maxlength="12000" placeholder="Paste a suspicious SMS, email, job offer, rental clause, loan terms…"></textarea>
+      <div class="input-meta"><span id="charCount">0 chars</span><span id="truncateNote"></span></div>
+
+      <div class="img-row" id="imgRow">
+        <label class="btn ghost small file-btn">+ Add screenshot / photo
+          <input type="file" id="fileInput" accept="image/png,image/jpeg" hidden />
+        </label>
+        <span class="hint">PNG/JPEG only · read on-device first</span>
+      </div>
+      <div class="img-preview hidden" id="imgPreviewWrap">
+        <img id="imgPreview" alt="Attached evidence preview" />
+        <button class="btn ghost small" id="imgRemove">Remove</button>
+      </div>
+
+      <div class="privacy-line">
+        <label class="switch"><input type="checkbox" id="cloudToggle" checked /><span class="track"></span></label>
+        <div>
+          <strong>Cloud deep-analysis</strong>
+          <p id="privacyNote">ON — the cloud only receives <em>redacted</em> text. Turn off for maximum privacy (on-device only).</p>
+        </div>
+      </div>
+
+      <button class="btn primary big" id="analyzeBtn">Analyze privately →</button>
+      <div class="warmup hidden" id="warmupWrap">
+        <div class="warmup-bar"><div id="warmupFill"></div></div>
+        <p id="warmupText">Waking Gemini Nano on-device…</p>
+      </div>
+      <p class="engine-note" id="engineNote"></p>
+    </section>
+
+    <section class="results-col" aria-label="Results" aria-live="polite">
+      <div class="pipeline">
+        <div class="stage" id="stage1">
+          <div class="stage-head"><span class="stage-num">1</span><h2>On-device triage</h2><span class="badge idle" id="s1Badge">idle</span></div>
+          <p class="stage-sub">Gemini Nano · instant verdict + PII scrub · <span id="s1Latency">—</span></p>
+          <div class="stage-body" id="s1Body"><p class="muted">Waiting for input. Raw text never leaves this tab in this stage.</p></div>
+        </div>
+        <div class="pipe-arrow" aria-hidden="true">⬇ redacted text only ⬇</div>
+        <div class="stage" id="stage2">
+          <div class="stage-head"><span class="stage-num">2</span><h2>Cloud deep-analysis</h2><span class="badge idle" id="s2Badge">idle</span></div>
+          <p class="stage-sub"><span id="s2Model">gemini flash</span> · explanation + action plan · <span id="s2Latency">—</span></p>
+          <div class="stage-body" id="s2Body"><p class="muted">Runs on redacted text only — names,numbers and IDs stay on your device.</p></div>
+        </div>
+      </div>
+
+      <div class="card hidden" id="resultsCard">
+        <div id="verdict"></div>
+        <div id="riskWrap"></div>
+        <h3>Why it looks this way</h3>
+        <div id="tactics"></div>
+        <h3>What the cloud saw <button class="btn ghost small" id="redactToggle">show my original</button></h3>
+        <pre class="redacted" id="redactView"></pre>
+        <h3>Deep analysis</h3>
+        <div class="markdown" id="deep"></div>
+        <div class="result-actions">
+          <button class="btn ghost small" id="copyBtn">Copy report</button>
+          <span class="muted" id="saveState"></span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <aside class="drawer hidden" id="historyDrawer" aria-label="Analysis history">
+    <div class="drawer-head"><h2>History</h2><button class="btn ghost small" id="historyClose">Close</button></div>
+    <p class="muted small" id="historyNote"></p>
+    <ul id="historyList"></ul>
+  </aside>
+
+  <footer><p id="disclaimer"></p></footer>
+  <div class="toast hidden" id="toast" role="status"></div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

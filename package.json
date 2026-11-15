@@ -1,0 +1,20 @@
+{
+  "name": "trustlens",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "TrustLens — a private-first AI trust advisor. Gemini Nano on-device triage + PII scrub, cloud deep analysis on redacted text only. Built on Firebase AI Logic hybrid inference.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "firebase": "^12.5.0"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  },
+  "license": "Apache-2.0"
+}
