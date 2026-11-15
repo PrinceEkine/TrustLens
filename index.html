@@ -105,6 +105,29 @@
     <ul id="historyList"></ul>
   </aside>
 
+  <div class="modal hidden" id="authModal" role="dialog" aria-modal="true" aria-label="Account">
+    <div class="modal-card">
+      <div class="drawer-head"><h2>Account</h2><button class="btn ghost small" id="authClose">Close</button></div>
+      <div id="authSigned"></div>
+      <form id="authForm" novalidate>
+        <label class="field-label" for="authEmail">Email</label>
+        <input type="email" id="authEmail" autocomplete="email" placeholder="you@example.com" />
+        <label class="field-label" for="authPass">Password</label>
+        <input type="password" id="authPass" autocomplete="current-password" placeholder="6+ characters" />
+        <p class="form-error hidden" id="authError"></p>
+        <div class="auth-btns">
+          <button type="submit" class="btn primary">Sign in</button>
+          <button type="button" class="btn ghost" id="signUpBtn">Create account</button>
+        </div>
+        <div class="auth-btns">
+          <button type="button" class="btn ghost" id="googleBtn">Continue with Google</button>
+          <button type="button" class="link" id="resetBtn">Forgot password?</button>
+        </div>
+        <p class="muted small">Creating an account keeps your guest history on this device.</p>
+      </form>
+    </div>
+  </div>
+
   <footer><p id="disclaimer"></p></footer>
   <div class="toast hidden" id="toast" role="status"></div>
   <script type="module" src="./src/main.js"></script>

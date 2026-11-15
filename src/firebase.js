@@ -4,7 +4,7 @@
 
 import { initializeApp } from 'firebase/app';
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check';
-import { getAuth, onAuthStateChanged, signInAnonymously, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, signInAnonymously, signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, EmailAuthProvider, linkWithCredential, signOut } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getRemoteConfig, fetchAndActivate, getAll } from 'firebase/remote-config';
 import { getAI, GoogleAIBackend } from 'firebase/ai';
@@ -113,4 +113,59 @@ export async function ensureSignedIn() {
 export async function signInWithGoogle() {
   if (!firebaseState.auth) throw new Error('Firebase is not configured.');
   await signInWithPopup(firebaseState.auth, new GoogleAuthProvider());
+}
+
+/** Create account; anonymous guests are UPGRADED (uid + history preserved). */
+export async function signUpEmail(email, password) {
+  const auth = firebaseState.auth;
+  if (!auth) throw new Error('not-configured');
+  const u = auth.currentUser;
+  if (u && u.isAnonymous) {
+    try {
+      await linkWithCredential(u, EmailAuthProvider.credential(email, password));
+      return { linked: true };
+    } catch (e) {
+      // Email taken → fall through to plain sign-in below.
+      if (e?.code !== 'auth/email-already-in-use' && e?.code !== 'auth/credential-already-in-use') throw e;
+    }
+  }
+  await createUserWithEmailAndPassword(auth, email, password);
+  return { linked: false };
+}
+
+export async function signInEmail(email, password) {
+  const auth = firebaseState.auth;
+  if (!auth) throw new Error('not-configured');
+  await signInWithEmailAndPassword(auth, email, password);
+}
+
+export async function sendReset(email) {
+  const auth = firebaseState.auth;
+  if (!auth) throw new Error('not-configured');
+  await sendPasswordResetEmail(auth, email);
+}
+
+/** Sign out, then quietly return to a fresh guest session. */
+export async function signOutUser() {
+  const auth = firebaseState.auth;
+  if (!auth) return;
+  await signOut(auth);
+  try { await signInAnonymously(auth); } catch { /* offline: stay signed out */ }
+}
+
+export function friendlyAuthError(e) {
+  switch (e?.code) {
+    case 'auth/invalid-email': return 'That email address looks invalid.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential': return 'Wrong email or password.';
+    case 'auth/email-already-in-use': return 'An account with this email already exists — sign in instead.';
+    case 'auth/weak-password': return 'Password must be at least 6 characters.';
+    case 'auth/operation-not-allowed': return 'Email login is off — enable Email/Password in Firebase console → Authentication → Sign-in method.';
+    case 'auth/too-many-requests': return 'Too many attempts — wait a minute and try again.';
+    case 'auth/network-request-failed': return 'Network unreachable — check your connection.';
+    case 'auth/popup-closed-by-user': return 'Sign-in popup was closed.';
+    case 'not-configured': return 'Firebase is not configured — add keys to .env.';
+    default: return (e?.message || 'Sign-in failed.').slice(0, 160);
+  }
 }

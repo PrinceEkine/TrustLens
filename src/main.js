@@ -2,7 +2,7 @@
 // Honesty rule: every result is badged with the engine that produced it
 // (ON_DEVICE / IN_CLOUD / DEMO / SKIPPED). Nothing is ever faked.
 
-import { initFirebase, watchUser, ensureSignedIn, signInWithGoogle, firebaseState } from './firebase.js';
+import { initFirebase, watchUser, ensureSignedIn, signInWithGoogle, signUpEmail, signInEmail, sendReset, signOutUser, friendlyAuthError, firebaseState } from './firebase.js';
 import { getModels, nanoStatus, warmDevice, fileToImagePart, normalizeStage1, runStage1OnDevice, runStage1Cloud, runStage2Stream, friendlyError } from './ai.js';
 import { demoTriage, demoDeepAnalysis } from './demo.js';
 import { saveAnalysis, listAnalyses, removeAnalysis, historyMode } from './history.js';
@@ -46,11 +46,35 @@ async function boot() {
     $('authBtn').textContent = !firebaseState.configured ? 'Demo mode'
       : !u ? 'Sign in' : u.isAnonymous ? 'Guest · Sign in' : (u.email || 'Signed in');
   });
-  $('authBtn').onclick = async () => {
+  $('authBtn').onclick = () => {
     if (!firebaseState.configured) { toast('Add Firebase keys to .env to enable sign-in.'); return; }
-    if (firebaseState.user && !firebaseState.user.isAnonymous) { toast('Already signed in.'); return; }
-    try { await signInWithGoogle(); toast('Signed in with Google.'); } catch (e) { toast(`Sign-in failed: ${e.message}`); }
+    openAuthModal();
   };
+  $('authClose').onclick = closeAuthModal;
+  $('authModal').addEventListener('click', (e) => { if (e.target.id === 'authModal') closeAuthModal(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { closeAuthModal(); $('historyDrawer').classList.add('hidden'); }
+  });
+  $('authForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    await authSubmit('signin');
+  });
+  $('signUpBtn').onclick = () => authSubmit('signup');
+  $('googleBtn').onclick = async () => {
+    try { await signInWithGoogle(); closeAuthModal(); toast('Signed in with Google.'); }
+    catch (e) { showAuthError(e); }
+  };
+  $('resetBtn').onclick = async () => {
+    const email = $('authEmail').value.trim();
+    if (!email) { showAuthError({ code: 'auth/invalid-email' }); return; }
+    try { await sendReset(email); toast(`Password reset sent to ${email}.`); closeAuthModal(); }
+    catch (e) { showAuthError(e); }
+  };
+  // Ctrl/Cmd+Enter analyzes from anywhere except while the auth modal is open.
+  document.addEventListener('keydown', (e) => {
+    const modalOpen = !$('authModal').classList.contains('hidden');
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !modalOpen) analyze();
+  });
 
   // Status pills
   setPill($('pillAppCheck'), `Shield: ${firebaseState.appCheck}`, firebaseState.appCheck === 'off' ? 'muted' : 'ok');
@@ -141,6 +165,49 @@ function clearImage() {
   S.imagePart = null; S.imageFile = null;
   $('fileInput').value = '';
   $('imgPreviewWrap').classList.add('hidden');
+}
+
+function openAuthModal() {
+  $('authError').classList.add('hidden');
+  const u = firebaseState.user;
+  const signed = u && !u.isAnonymous;
+  $('authSigned').innerHTML = signed
+    ? `<div class="signed-box"><p>Signed in as <strong>${u.email || 'account'}</strong></p><button class="btn ghost small" id="signOutBtn">Sign out</button></div>`
+    : (u ? '<p class="muted small">Browsing as guest — sign in to sync history everywhere.</p>' : '');
+  $('authForm').style.display = signed ? 'none' : '';
+  $('authModal').classList.remove('hidden');
+  const so = $('signOutBtn');
+  if (so) so.onclick = async () => { await signOutUser(); closeAuthModal(); toast('Signed out — fresh guest session.'); };
+  if (!signed) $('authEmail').focus();
+}
+
+function closeAuthModal() {
+  $('authModal').classList.add('hidden');
+  $('authPass').value = '';
+}
+
+function showAuthError(e) {
+  const el = $('authError');
+  el.textContent = friendlyAuthError(e);
+  el.classList.remove('hidden');
+}
+
+async function authSubmit(kind) {
+  const email = $('authEmail').value.trim();
+  const pw = $('authPass').value;
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { showAuthError({ code: 'auth/invalid-email' }); return; }
+  if (pw.length < 6) { showAuthError({ code: 'auth/weak-password' }); return; }
+  try {
+    if (kind === 'signup') {
+      const r = await signUpEmail(email, pw);
+      closeAuthModal();
+      toast(r.linked ? 'Account created — guest history kept ✓' : 'Account created — welcome ✓');
+    } else {
+      await signInEmail(email, pw);
+      closeAuthModal();
+      toast('Signed in ✓');
+    }
+  } catch (e) { showAuthError(e); }
 }
 
 function setBusy(busy) {

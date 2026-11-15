@@ -41,7 +41,7 @@ across platforms, which is the heart of the Grand Prize story.
 |---|---|
 | **AI Logic (hybrid)** | `src/ai.js` — Nano triage + Flash deep-analysis, `inferenceSource` badges, latency per stage |
 | **App Check** | `src/firebase.js` — reCAPTCHA Enterprise in prod, **debug provider** for local dev/submission |
-| **Authentication** | Anonymous auto sign-in + Google upgrade (`src/firebase.js`, header button) |
+| **Authentication** | Anonymous auto sign-in + Google/email upgrade with guest-history linking, reset, sign-out (`src/firebase.js`, account modal) |
 | **Firestore** | Redacted-only history, per-user security rules (`src/history.js`, `firestore.rules`) |
 | **Remote Config** | Cloud model, risk thresholds, feature flags, disclaimer text (`RC_DEFAULTS`, live fetch) |
 | **Hosting** | `firebase.json` — `firebase deploy` serves `dist/` |
