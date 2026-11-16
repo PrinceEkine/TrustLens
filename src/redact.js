@@ -10,6 +10,24 @@ const PII_PATTERNS = [
   { type: 'url-query', re: /(https?:\/\/[^\s?]+)\?[^\s]*/g },
 ];
 
+/** Match spans of each PII pattern against the ORIGINAL text, skipping
+ *  overlaps (first pattern wins). Powers the redaction diff view. */
+export function prescrubSpans(text) {
+  const src = String(text ?? '');
+  const spans = [];
+  const claimed = (s, e) => spans.some((sp) => s < sp.end && e > sp.start);
+  for (const { type, re } of PII_PATTERNS) {
+    re.lastIndex = 0;
+    for (const m of src.matchAll(re)) {
+      const s = m.index ?? 0;
+      const e = s + m[0].length;
+      if (!claimed(s, e)) spans.push({ start: s, end: e, type });
+    }
+  }
+  spans.sort((a, b) => a.start - b.start);
+  return spans;
+}
+
 /** Deterministic regex pre-scrub. The on-device model does the smart
  *  redaction; this is a cheap safety net applied before anything reaches stage 2. */
 export function prescrub(text) {

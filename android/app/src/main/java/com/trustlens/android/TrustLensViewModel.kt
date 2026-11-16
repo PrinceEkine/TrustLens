@@ -12,9 +12,13 @@ import com.trustlens.android.ai.HybridAi
 import com.trustlens.android.ai.TriageResult
 import com.trustlens.android.data.HistoryItem
 import com.trustlens.android.data.HistoryRepo
+import com.trustlens.android.data.LinkXray
 import com.trustlens.android.data.RcValues
 import com.trustlens.android.data.Redact
 import com.trustlens.android.data.Remote
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,7 +43,14 @@ data class UiState(
     val s2Latency: String = "—",
     val deep: String = "",
     val engineNote: String = "",
-    val showOriginal: Boolean = false,
+    val lastInput: String = "",
+    val linkReports: List<LinkXray.Report> = emptyList(),
+    val redactMode: Int = 0, // 0 redacted | 1 original | 2 side-by-side
+    val demoRunning: Boolean = false,
+    val demoIndex: Int = 0,
+    val demoTitle: String = "",
+    val demoCaption: String = "",
+    val demoElapsed: Int = 0,
     val toast: String? = null,
     val historyOpen: Boolean = false,
     val history: List<HistoryItem> = emptyList(),
@@ -58,6 +69,22 @@ val SAMPLES = mapOf(
         "“0% interest” loan offer" to "Get an instant personal loan of Rs 2,00,000 at 0% interest! Processing fee: 8% deducted upfront. Late payment: Rs 500/day + 42% p.a. penal interest, compounded monthly. By accepting, you authorize auto-debit from all linked accounts and consent to contact-list access for collections. Prepayment allowed after 12 EMIs with 6% foreclosure charge.",
         "App subscription terms" to "Free 3-day trial, then Rs 999/week billed automatically until cancelled. Cancellation requests are processed within 10 business days and do not stop the current billing cycle. Deleting the app does not cancel your subscription. All payments are final and non-refundable. Continued use constitutes acceptance of future price changes without notice.",
     ),
+)
+
+/** Guided 3-minute demo script. Step budgets sum to exactly 180 seconds. Mirrors web src/demotour.js. */
+const val DEMO_BUDGET_S = 180
+
+data class DemoStep(val id: String, val seconds: Int, val title: String, val caption: String)
+
+val DEMO_STEPS = listOf(
+    DemoStep("upi", 15, "The hook: a UPI refund scam", "0:00 — Scam Shield. A blocked-account threat with a collect request and a callback number. Raw text stays on-device."),
+    DemoStep("analyze1", 40, "On-device triage, then cloud depth", "Watch Stage 1: Nano verdict + PII scrub — then the cloud deep-analysis streams on redacted text only."),
+    DemoStep("diff", 20, "Proof of privacy: the diff", "Side by side: what stayed on your phone vs the only text the cloud ever saw."),
+    DemoStep("privacy", 30, "Maximum-privacy mode", "Cloud OFF, re-run: a pure on-device result. Nothing leaves the phone — the honest SKIPPED badge says so."),
+    DemoStep("fine", 40, "Second lens: Fine-Print X-ray", "Cloud back on. Same engine, new lens: the rental auto-renewal trap, X-rayed clause by clause."),
+    DemoStep("history", 15, "History syncs across platforms", "Redacted excerpts in Firestore — the same record appears on web. One project, two apps."),
+    DemoStep("rc", 10, "Remote Config runs the dials", "Thresholds, model, disclaimer — all live from Remote Config. No redeploy to retune."),
+    DemoStep("close", 10, "Private by construction", "TrustLens: ON_DEVICE triage plus IN_CLOUD depth. Thanks for watching — now try your own message."),
 )
 
 /** Orchestrates the two-stage hybrid pipeline. Mirrors web src/main.js exactly. */
@@ -83,7 +110,8 @@ class TrustLensViewModel(app: Application) : AndroidViewModel(app) {
     fun setInput(t: String) = _s.update { it.copy(input = t) }
     fun setBitmap(b: Bitmap?) = _s.update { it.copy(bitmap = b) }
     fun setCloudOn(b: Boolean) = _s.update { it.copy(cloudOn = b) }
-    fun toggleOriginal() = _s.update { it.copy(showOriginal = !it.showOriginal) }
+    fun cycleRedact() = _s.update { it.copy(redactMode = (it.redactMode + 1) % 3) }
+    fun setRedactMode(m: Int) = _s.update { it.copy(redactMode = m) }
     fun toast(msg: String?) = _s.update { it.copy(toast = msg) }
 
     private fun isOnline(): Boolean {
@@ -95,11 +123,15 @@ class TrustLensViewModel(app: Application) : AndroidViewModel(app) {
         val st = _s.value
         if (st.busy) return
         if (st.input.isBlank() && st.bitmap == null) { toast("Paste some text or attach a screenshot first."); return; }
-        viewModelScope.launch {
+        viewModelScope.launch { runPipeline(st) }
+    }
+
+    /** The full two-stage pipeline as one awaitable unit (also drives the demo tour). */
+    private suspend fun runPipeline(st: UiState) {
             val rc = _s.value.rc
             val (text, _) = Redact.truncate(st.input.trim(), rc.maxInputChars)
             val online = isOnline()
-            _s.update { it.copy(busy = true, online = online, s1 = null, deep = "", engineNote = "", showOriginal = false, s1Badge = "running", s2Badge = "…") }
+            _s.update { it.copy(busy = true, online = online, s1 = null, deep = "", engineNote = "", lastInput = text, linkReports = LinkXray.xray(text), redactMode = 0, s1Badge = "running", s2Badge = "…") }
             try {
                 // ---- Stage 1 ----
                 var s1: TriageResult
@@ -113,6 +145,8 @@ class TrustLensViewModel(app: Application) : AndroidViewModel(app) {
                     s1Badge = "ON_DEVICE"
                     _s.update { it.copy(s1Latency = fmtMs(run.ms)) }
                     engine1 = "Gemini Nano on-device (${fmtMs(run.ms)})"
+                } catch (e1: CancellationException) {
+                    throw e1
                 } catch (e1: Exception) {
                     val fe = HybridAi.friendlyError(e1)
                     if (_s.value.cloudOn && rc.cloudStageEnabled && online) {
@@ -122,6 +156,8 @@ class TrustLensViewModel(app: Application) : AndroidViewModel(app) {
                             s1Badge = "IN_CLOUD"
                             _s.update { it.copy(s1Latency = fmtMs(run.ms)) }
                             engine1 = "cloud triage fallback (${fmtMs(run.ms)}) — ${fe.first}"
+                        } catch (e2: CancellationException) {
+                            throw e2
                         } catch (e2: Exception) {
                             s1 = DemoEngine.triage(st.mode, text, rc)
                             s1Badge = "DEMO"
@@ -157,6 +193,8 @@ class TrustLensViewModel(app: Application) : AndroidViewModel(app) {
                         deep = sb.toString()
                         _s.update { it.copy(s2Badge = "IN_CLOUD", s2Latency = fmtMs(System.currentTimeMillis() - t0)) }
                         engine2 = "${rc.cloudModel} (${_s.value.s2Latency})"
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         val fe = HybridAi.friendlyError(e)
                         deep = DemoEngine.deepAnalysis(st.mode, s1)
@@ -189,11 +227,94 @@ class TrustLensViewModel(app: Application) : AndroidViewModel(app) {
                 _s.update {
                     it.copy(engineNote = it.engineNote + if (synced) " · saved to Firestore ✓" else " · kept on this device")
                 }
+            } catch (e: CancellationException) {
+                throw e // demo stop must interrupt; never swallow
             } catch (e: Exception) {
                 toast("Analysis failed: ${e.message}")
             } finally {
                 _s.update { it.copy(busy = false, warmup = null) }
             }
+    }
+
+    // ---------- Guided 3-minute demo tour (same beats as web + judging video) ----------
+    private var demoJob: Job? = null
+    private var demoToken = 0
+
+    fun startDemo() {
+        if (_s.value.demoRunning) { stopDemo(); return }
+        if (_s.value.busy) { toast("Wait for the current analysis to finish, then start the tour."); return }
+        demoJob?.cancel()
+        _s.update { it.copy(demoRunning = true, demoIndex = 0, demoElapsed = 0, historyOpen = false) }
+        demoJob = viewModelScope.launch {
+            val t0 = System.currentTimeMillis()
+            val ticker = launch {
+                while (true) {
+                    delay(1000)
+                    _s.update { it.copy(demoElapsed = ((System.currentTimeMillis() - t0) / 1000).toInt()) }
+                }
+            }
+            try {
+                val token = ++demoToken
+                while (_s.value.demoRunning && token == demoToken) {
+                    val i = _s.value.demoIndex.coerceIn(0, DEMO_STEPS.size - 1)
+                    val step = DEMO_STEPS[i]
+                    _s.update { it.copy(demoIndex = i, demoTitle = step.title, demoCaption = step.caption) }
+                    val a0 = System.currentTimeMillis()
+                    try {
+                        demoAction(step.id)
+                    } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+                    if (token != demoToken || !_s.value.demoRunning) break
+                    if (_s.value.demoIndex != i) continue // user jumped steps
+                    val deadline = System.currentTimeMillis() + maxOf(3000L, step.seconds * 1000L - (System.currentTimeMillis() - a0))
+                    while (System.currentTimeMillis() < deadline) {
+                        if (token != demoToken || !_s.value.demoRunning || _s.value.demoIndex != i) break
+                        delay(250)
+                    }
+                    if (token != demoToken || !_s.value.demoRunning) break
+                    if (_s.value.demoIndex != i) continue
+                    if (i >= DEMO_STEPS.size - 1) break
+                    _s.update { it.copy(demoIndex = i + 1) }
+                }
+                if (_s.value.demoRunning && _s.value.demoIndex >= DEMO_STEPS.size - 1) {
+                    toast("Demo complete — now try your own message.")
+                }
+            } finally {
+                ticker.cancel()
+                _s.update { it.copy(demoRunning = false) }
+            }
+        }
+    }
+
+    fun stopDemo() {
+        demoToken++
+        demoJob?.cancel()
+        demoJob = null
+        _s.update { it.copy(demoRunning = false) }
+    }
+
+    fun demoNext() = _s.update { it.copy(demoIndex = (it.demoIndex + 1).coerceIn(0, DEMO_STEPS.size - 1)) }
+    fun demoPrev() = _s.update { it.copy(demoIndex = (it.demoIndex - 1).coerceIn(0, DEMO_STEPS.size - 1)) }
+
+    private suspend fun demoAnalyze() {
+        var waited = 0
+        while (_s.value.busy && waited < 60_000) { delay(500); waited += 500 }
+        if (!_s.value.busy) runPipeline(_s.value)
+    }
+
+    private suspend fun demoAction(id: String) {
+        when (id) {
+            "upi" -> { setMode("scam"); setInput(SAMPLES["scam"]!!.first().second) }
+            "analyze1" -> demoAnalyze()
+            "diff" -> if (_s.value.s1 != null) setRedactMode(2)
+            "privacy" -> { setCloudOn(false); demoAnalyze() }
+            "fine" -> {
+                if (_s.value.rc.cloudStageEnabled) setCloudOn(true)
+                setMode("scam") // reset first so the lens switch is visible
+                setMode("fine"); setInput(SAMPLES["fine"]!!.first().second); demoAnalyze()
+            }
+            "history" -> openHistory()
+            "rc" -> closeHistory()
+            "close" -> { }
         }
     }
 
@@ -227,6 +348,7 @@ class TrustLensViewModel(app: Application) : AndroidViewModel(app) {
                     item.tactics.map { t -> com.trustlens.android.ai.Tactic(t["label"].orEmpty(), t["why"].orEmpty(), t["quote"].orEmpty()) },
                     item.redactedText, 0),
                 deep = item.deep, s1Badge = "history", s2Badge = "history",
+                lastInput = "", linkReports = LinkXray.xray(item.redactedText), redactMode = 0,
                 engineNote = "Restored from history · originally: ${item.engines.ifEmpty { "unknown engines" }}",
             )
         }

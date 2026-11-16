@@ -43,13 +43,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.trustlens.android.DEMO_BUDGET_S
+import com.trustlens.android.DEMO_STEPS
 import com.trustlens.android.SAMPLES
 import com.trustlens.android.TrustLensViewModel
 import com.trustlens.android.ai.TriageResult
+import com.trustlens.android.data.LinkXray
+import com.trustlens.android.data.Redact
 
 private val Muted = Color(0xFF93A1BD)
 private val Warn = Color(0xFFFBBF24)
@@ -72,6 +78,7 @@ fun TrustLensScreen(vm: TrustLensViewModel = viewModel()) {
         // Header + status
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("🛡️ TrustLens", fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            TextButton(onClick = { vm.startDemo() }) { Text(if (s.demoRunning) "■ Stop" else "▶ 3-min demo", fontSize = 12.sp) }
             TextButton(onClick = { vm.openHistory() }) { Text("History") }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -79,6 +86,7 @@ fun TrustLensScreen(vm: TrustLensViewModel = viewModel()) {
             Pill(if (s.cloudOn) "Cloud: ${s.rc.cloudModel}" else "Cloud: off", if (s.cloudOn) Info else Muted)
             Pill(if (s.uid != null) "User: guest" else "User: out", if (s.uid != null) Good else Warn)
         }
+        if (s.demoRunning) DemoBar(s, vm)
 
         // Tabs
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -237,15 +245,23 @@ private fun Results(s: com.trustlens.android.UiState, s1: TriageResult, vm: Trus
                 if (t.why.isNotEmpty()) Text(t.why, fontSize = 13.sp)
                 if (t.quote.isNotEmpty()) Text("“${t.quote}”", color = Muted, fontSize = 12.sp)
             }
+            if (s.linkReports.isNotEmpty()) {
+                Text("LINK X-RAY · ON-DEVICE CHECKS", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                LinkXrayCard(s.linkReports)
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("WHAT THE CLOUD SAW", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                TextButton(onClick = { vm.toggleOriginal() }) { Text(if (s.showOriginal) "show redacted" else "show my original", fontSize = 12.sp) }
+                TextButton(onClick = { vm.cycleRedact() }) { Text(redactLabel(s.redactMode), fontSize = 12.sp) }
             }
-            Text(
-                if (s.showOriginal) s.input else s1.redactedText,
-                fontSize = 12.sp, color = Color(0xFFC9D5EF),
-                modifier = Modifier.background(Color(0xFF070D1A), RoundedCornerShape(8.dp)).padding(10.dp).fillMaxWidth()
-            )
+            if (s.redactMode != 1) {
+                Text("CLOUD SAW — REDACTED", color = Good, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                HighlightedRedacted(s1.redactedText)
+            }
+            if (s.redactMode != 0) {
+                Text("STAYED ON DEVICE — YOUR ORIGINAL", color = Warn, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                if (s.lastInput.isEmpty()) Text("Original not stored — redacted record only.", color = Muted, fontSize = 12.sp)
+                else HighlightedOriginal(s.lastInput)
+            }
             Text("DEEP ANALYSIS", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             if (s.deep.isEmpty() && s.busy) CircularProgressIndicator(modifier = Modifier.size(24.dp))
             else Text(s.deep.ifEmpty { "…" }, fontSize = 13.sp)
@@ -281,6 +297,84 @@ private fun HistorySheet(vm: TrustLensViewModel) {
         }
     }
 }
+
+@Composable
+private fun DemoBar(s: com.trustlens.android.UiState, vm: TrustLensViewModel) {
+    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF0B1322))) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Step ${s.demoIndex + 1}/${DEMO_STEPS.size}", color = Color(0xFF06281C), fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.background(Good, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 4.dp))
+                Text("${fmtClock(s.demoElapsed)} / ${fmtClock(DEMO_BUDGET_S)}",
+                    color = if (s.demoElapsed > DEMO_BUDGET_S) Warn else Muted, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f))
+            }
+            Text(s.demoTitle, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Good)
+            Text(s.demoCaption, fontSize = 13.sp)
+            LinearProgressIndicator(progress = { (s.demoElapsed / DEMO_BUDGET_S.toFloat()).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { vm.demoPrev() }) { Text("← Prev") }
+                TextButton(onClick = { vm.demoNext() }) { Text("Next →") }
+                TextButton(onClick = { vm.stopDemo() }) { Text("Stop") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LinkXrayCard(reports: List<LinkXray.Report>) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        reports.forEach { r ->
+            val tone = if (r.worst == "bad") Bad else if (r.worst == "warn") Warn else Good
+            Column(Modifier.background(Color(0xFF0E1628), RoundedCornerShape(8.dp)).padding(10.dp).fillMaxWidth()) {
+                Text("${if (r.worst == "ok") "✅" else "⚠️"} ${r.host.ifEmpty { r.url }} · ${r.risk}/100 link risk",
+                    fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = tone)
+                Text(r.url, color = Muted, fontSize = 11.sp)
+                r.findings.forEach { f ->
+                    val c = if (f.level == "bad") Bad else if (f.level == "warn") Warn else Good
+                    Text("• ${f.label}", color = c, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                    Text(f.detail, fontSize = 12.sp, color = Muted)
+                }
+            }
+        }
+        Text("🔒 Deterministic checks, computed on-device — not an AI verdict.", color = Muted, fontSize = 11.sp)
+    }
+}
+
+private fun redactLabel(mode: Int) = when (mode) {
+    1 -> "show side-by-side"
+    2 -> "show redacted"
+    else -> "show my original"
+}
+
+@Composable
+private fun HighlightedRedacted(text: String) {
+    val ann = buildAnnotatedString {
+        append(text)
+        for (r in Redact.maskSpans(text)) {
+            addStyle(SpanStyle(background = Color(0xFF0E3B2C), color = Color(0xFF7DF0C4)), r.first, r.last + 1)
+        }
+    }
+    Text(ann, fontSize = 12.sp, color = Color(0xFFC9D5EF),
+        modifier = Modifier.background(Color(0xFF070D1A), RoundedCornerShape(8.dp)).padding(10.dp).fillMaxWidth())
+}
+
+@Composable
+private fun HighlightedOriginal(text: String) {
+    val ann = buildAnnotatedString {
+        append(text)
+        for (sp in Redact.prescrubSpans(text)) {
+            if (sp.start >= 0 && sp.end <= text.length && sp.end > sp.start) {
+                addStyle(SpanStyle(background = Color(0xFF3A2A05), color = Color(0xFFFCD34D)), sp.start, sp.end)
+            }
+        }
+    }
+    Text(ann, fontSize = 12.sp, color = Color(0xFFC9D5EF),
+        modifier = Modifier.background(Color(0xFF070D1A), RoundedCornerShape(8.dp)).padding(10.dp).fillMaxWidth())
+}
+
+private fun fmtClock(totalS: Int) = "${totalS / 60}:${(totalS % 60).toString().padStart(2, '0')}"
 
 private fun uriToBitmap(ctx: android.content.Context, uri: Uri): Bitmap? = try {
     if (Build.VERSION.SDK_INT >= 28) {

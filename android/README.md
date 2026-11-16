@@ -42,14 +42,15 @@ android/
   app/src/main/...
     TrustLensApplication.kt  Firebase init + App Check (debug in DEBUG, Play Integrity in release)
     MainActivity.kt          Compose entry point
-    TrustLensViewModel.kt    pipeline orchestration (mirrors web main.js)
+    TrustLensViewModel.kt    pipeline orchestration + 3-min demo tour (mirrors web main.js)
     ai/HybridAi.kt           ONLY_ON_DEVICE triage + ONLY_IN_CLOUD streaming deep-analysis
     ai/Prompts.kt            stage-1/2 prompts (same contract as web)
     ai/DemoEngine.kt         labeled heuristic fallback (never passed off as AI)
-    data/Redact.kt           PII pre-scrub + tolerant model-JSON parsing
+    data/Redact.kt           PII pre-scrub + span capture + tolerant model-JSON parsing
+    data/LinkXray.kt         deterministic on-device URL risk checks (mirrors web links.js)
     data/Remote.kt           Remote Config fetch (same keys as web)
     data/HistoryRepo.kt      shared 'analyses' collection + local fallback
-    ui/TrustLensScreen.kt    full Compose UI (tabs, stages, verdict, history)
+    ui/TrustLensScreen.kt    full Compose UI (tabs, stages, verdict, links, diff, history, tour bar)
     ui/Theme.kt              dark Material3 theme
 ```
 

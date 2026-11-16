@@ -2,9 +2,12 @@
 // Run: npm run smoke
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { prescrub, safeJsonParse, escapeHtml, renderLiteMarkdown, truncateForDevice } from '../src/redact.js';
+import { prescrub, prescrubSpans, safeJsonParse, escapeHtml, renderLiteMarkdown, truncateForDevice } from '../src/redact.js';
 import { demoTriage, demoDeepAnalysis } from '../src/demo.js';
 import { friendlyError } from '../src/ai.js';
+import { extractLinks, analyzeLink, xrayLinks } from '../src/links.js';
+import { highlightMasks, highlightPii, renderLinkXray } from '../src/ui.js';
+import { DEMO_STEPS, DEMO_BUDGET_S, fmtClock } from '../src/demotour.js';
 
 const RC = { risk_high: 70, risk_medium: 35 };
 
@@ -61,6 +64,88 @@ describe('demo.js fallback engine', () => {
     const md = demoDeepAnalysis('scam', s1);
     assert.ok(md.includes('## Verdict') && md.includes('## What to do next'));
     assert.ok(md.includes('Advance fee') || md.includes('Reply pressure'));
+  });
+});
+
+describe('links.js Link X-ray', () => {
+  test('extractLinks finds URLs but skips emails and UPI ids', () => {
+    const links = extractLinks('Pay http://indiap0st-track.xyz/pay?id=1 now, or mail me@x.com, or pay refunds@okhdfc. Also visit example.com/a.');
+    assert.ok(links.some((l) => l.includes('indiap0st-track.xyz')));
+    assert.ok(links.some((l) => l.includes('example.com')));
+    assert.ok(!links.some((l) => l.includes('me@') || l.includes('x.com') && l === 'x.com'), 'email domain must not leak in');
+    assert.ok(!links.some((l) => l.includes('refunds@okhdfc')), 'UPI id is not a link');
+  });
+
+  test('phishing link flags swap + risky TLD + http', () => {
+    const r = analyzeLink('http://indiap0st-track.xyz/pay?id=88412&user=amit_91');
+    assert.equal(r.host, 'indiap0st-track.xyz');
+    assert.equal(r.worst, 'warn');
+    assert.ok(r.risk >= 28);
+    const labels = r.findings.map((f) => f.label).join('|');
+    assert.ok(/Letter\/number swap/.test(labels));
+    assert.ok(/Risky TLD/.test(labels));
+    assert.ok(/Unencrypted http/.test(labels));
+  });
+
+  test('IP host and @ trick are bad', () => {
+    const ip = analyzeLink('http://192.168.1.9/login');
+    assert.equal(ip.worst, 'bad');
+    const at = analyzeLink('https://hdfcbank.com@evil.example/login');
+    assert.ok(at.findings.some((f) => f.label === '@ trick'));
+    assert.equal(at.worst, 'bad');
+  });
+
+  test('clean https link passes with ok', () => {
+    const r = analyzeLink('https://www.example.com/about');
+    assert.equal(r.worst, 'ok');
+    assert.equal(r.risk, 0);
+  });
+
+  test('xrayLinks maps text to reports', () => {
+    const rs = xrayLinks('no links here, just words');
+    assert.equal(rs.length, 0);
+  });
+});
+
+describe('redact.js spans + diff highlighters', () => {
+  test('prescrubSpans returns sorted non-overlapping spans', () => {
+    const spans = prescrubSpans('Call +91 98220 44513 or mail me@x.com now');
+    assert.ok(spans.length >= 2);
+    assert.deepEqual(spans.map((s) => s.type).sort(), ['email', 'phone']);
+    for (let i = 1; i < spans.length; i++) assert.ok(spans[i].start >= spans[i - 1].end, 'no overlaps');
+    const phone = spans.find((s) => s.type === 'phone');
+    assert.equal('Call +91 98220 44513 or mail me@x.com now'.slice(phone.start, phone.end), '+91 98220 44513');
+  });
+
+  test('highlightPii escapes HTML and marks spans', () => {
+    const html = highlightPii('Hi <b>Bob</b>, call +91 98220 44513', [{ start: 20, end: 35, type: 'phone' }]);
+    assert.ok(!html.includes('<b>') && html.includes('&lt;b&gt;'));
+    assert.ok(html.includes('<mark class="pii"') && html.includes('+91 98220 44513'));
+  });
+
+  test('highlightMasks marks model + scrubber tokens', () => {
+    const html = highlightMasks('Call [NAME] on +9•••[phone] or visit http://x.io/?… ok');
+    assert.ok(html.includes('<mark class="mask">[NAME]</mark>'));
+    assert.ok(html.includes('[phone]</mark>'));
+  });
+
+  test('renderLinkXray escapes hostile link text', () => {
+    const html = renderLinkXray([{ url: '"><script>alert(1)</script>', host: '<evil>', findings: [{ level: 'bad', label: '<b>x</b>', detail: 'd' }], worst: 'bad', risk: 34 }]);
+    assert.ok(!html.includes('<script>') && html.includes('&lt;evil&gt;'));
+  });
+});
+
+describe('demotour.js 3-minute script', () => {
+  test('step budgets sum to the 180s budget', () => {
+    assert.equal(DEMO_BUDGET_S, 180);
+    assert.equal(DEMO_STEPS.reduce((n, s) => n + s.seconds, 0), 180);
+    assert.ok(DEMO_STEPS.every((s) => s.id && s.caption && s.title));
+  });
+
+  test('fmtClock formats m:ss', () => {
+    assert.equal(fmtClock(0), '0:00');
+    assert.equal(fmtClock(75), '1:15');
+    assert.equal(fmtClock(180), '3:00');
   });
 });
 

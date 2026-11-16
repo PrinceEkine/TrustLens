@@ -102,20 +102,23 @@ Enterprise key. HTTPS is automatic, which on-device Nano requires outside localh
 ## Project structure
 
 ```
-index.html            app shell (header pills, pipeline cards, results, history drawer)
-src/main.js           orchestration: pipeline, fallbacks, history restore, honest engine badges
+index.html            app shell (header pills, pipeline cards, results, history drawer, tour bar)
+src/main.js           orchestration: pipeline, fallbacks, history restore, honest engine badges, tour runner
 src/ai.js             Firebase AI Logic: ONLY_ON_DEVICE triage + ONLY_IN_CLOUD deep-analysis
 src/firebase.js       App / App Check / Auth / Firestore / Remote Config bootstrap
 src/schemas→ai.js     Stage-1 JSON contract via Schema helpers (verdict, risk, tactics, redaction)
 src/prompts.js        Stage-1/2 prompt templates per lens
-src/redact.js         deterministic PII pre-scrub, safe JSON parse, XSS-safe markdown (node-safe)
+src/redact.js         deterministic PII pre-scrub + span capture, safe JSON parse, XSS-safe markdown (node-safe)
+src/links.js          Link X-ray: deterministic on-device URL risk checks (node-safe)
+src/demotour.js       guided 3-minute demo script data — step budgets sum to 180 s
 src/demo.js           labeled heuristic fallback — same JSON contract, never passed off as AI
 src/history.js        Firestore CRUD (redacted only) + local-session fallback
-src/ui.js             render helpers (verdict, risk meter, tactics, history)
+src/ui.js             render helpers (verdict, risk meter, tactics, links, diff highlights, history)
 src/styles.css        full dark UI, no framework
 public/sw.js          offline app-shell cache (Firebase/Google APIs never cached)
 scripts/smoke.mjs     node:test suite
 firestore.rules       per-user read/write, no updates
+JUDGES.md             Nano + Firebase AI setup for judges, badge legend, video beats
 ```
 
 ## Honesty notes (for judges)
@@ -129,8 +132,12 @@ firestore.rules       per-user read/write, no updates
 
 ## 3-minute demo script
 
+Press **▶ 3-min demo** (web header / Android top bar): the app replays these
+beats itself with a live 3:00 budget clock — or step manually with ←/→.
+
 1. (0:00) Paste the UPI sample → Analyze → Nano verdict in ms, PII scrubbed, all on-device.
-2. (0:45) Watch the cloud deep-analysis stream — toggle “show my original” vs redacted.
+2. (0:45) Watch the cloud deep-analysis stream — Link X-ray flags the URL tricks, then the
+   redaction diff proves what the cloud saw vs what stayed on-device.
 3. (1:30) Turn cloud OFF → re-run: pure on-device result, “maximum-privacy mode”.
 4. (2:00) Fine-Print X-ray on the rental clause; open History (Firestore-synced).
 5. (2:30) Show Remote Config changing a threshold/disclaimer live; close on architecture.

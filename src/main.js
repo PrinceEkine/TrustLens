@@ -6,9 +6,11 @@ import { initFirebase, watchUser, ensureSignedIn, signInWithGoogle, signUpEmail,
 import { getModels, nanoStatus, warmDevice, fileToImagePart, normalizeStage1, runStage1OnDevice, runStage1Cloud, runStage2Stream, friendlyError } from './ai.js';
 import { demoTriage, demoDeepAnalysis } from './demo.js';
 import { saveAnalysis, listAnalyses, removeAnalysis, historyMode } from './history.js';
-import { truncateForDevice } from './redact.js';
+import { truncateForDevice, prescrubSpans } from './redact.js';
+import { xrayLinks } from './links.js';
 import { SAMPLES } from './samples.js';
-import { $, toast, setPill, setBadge, renderStage1, renderVerdict, renderRisk, renderTactics, renderDeep, renderHistory, fmtMs, icon } from './ui.js';
+import { DEMO_STEPS, DEMO_BUDGET_S, fmtClock } from './demotour.js';
+import { $, toast, setPill, setBadge, renderStage1, renderVerdict, renderRisk, renderTactics, renderDeep, renderHistory, renderLinkXray, highlightMasks, highlightPii, fmtMs, icon } from './ui.js';
 
 const S = {
   mode: 'scam',
@@ -16,7 +18,7 @@ const S = {
   imageFile: null,
   last: null, // { s1, deep, engines }
   history: [],
-  showingOriginal: false,
+  redactMode: 'redacted', // redacted | original | both
 };
 
 const MODE_COPY = {
@@ -98,6 +100,10 @@ async function boot() {
   $('historyBtn').onclick = openHistory;
   $('historyClose').onclick = () => $('historyDrawer').classList.add('hidden');
   $('historyList').addEventListener('click', onHistoryClick);
+  $('tourBtn').onclick = startTour;
+  $('tourPrev').onclick = () => gotoStep(Tour.idx - 1);
+  $('tourNext').onclick = () => gotoStep(Tour.idx + 1);
+  $('tourStop').onclick = () => stopTour(false);
 
   if (!firebaseState.configured) {
     $('engineNote').textContent = 'Demo mode: add Firebase keys (.env) + Chrome Nano flags for the full hybrid pipeline. See README.';
@@ -222,8 +228,7 @@ async function analyze() {
   const { text, truncated } = truncateForDevice(rawInput, rc.max_input_chars);
   $('truncateNote').textContent = truncated ? `trimmed to ${rc.max_input_chars} chars for on-device context` : '';
   $('resultsCard').classList.add('hidden');
-  S.showingOriginal = false;
-  $('redactToggle').textContent = 'show my original';
+  setRedactMode('redacted');
 
   setBusy(true);
   const engines = {};
@@ -342,15 +347,29 @@ function renderResultsHead(s1, rc, originalText) {
   $('verdict').innerHTML = renderVerdict(s1);
   $('riskWrap').innerHTML = renderRisk(s1, rc);
   $('tactics').innerHTML = renderTactics(s1.tactics);
-  $('redactView').textContent = s1.redactedText;
+  const reports = xrayLinks(originalText);
+  $('linkWrap').classList.toggle('hidden', !reports.length);
+  $('links').innerHTML = renderLinkXray(reports);
+  $('redactView').innerHTML = highlightMasks(s1.redactedText);
+  $('originalView').innerHTML = highlightPii(originalText, prescrubSpans(originalText));
   $('resultsCard').dataset.original = originalText;
+  setRedactMode('redacted');
+}
+
+const REDACT_CYCLE = { redacted: 'original', original: 'both', both: 'redacted' };
+const REDACT_LABEL = { redacted: 'show my original', original: 'show side-by-side', both: 'show redacted' };
+
+function setRedactMode(mode) {
+  S.redactMode = mode;
+  $('paneRedacted').classList.toggle('hidden', mode === 'original');
+  $('paneOriginal').classList.toggle('hidden', mode === 'redacted');
+  $('redactCard').classList.toggle('both', mode === 'both');
+  $('redactToggle').textContent = REDACT_LABEL[mode];
 }
 
 function toggleRedact() {
   if (!S.last) return;
-  S.showingOriginal = !S.showingOriginal;
-  $('redactView').textContent = S.showingOriginal ? ($('resultsCard').dataset.original || '') : S.last.s1.redactedText;
-  $('redactToggle').textContent = S.showingOriginal ? 'show redacted' : 'show my original';
+  setRedactMode(REDACT_CYCLE[S.redactMode]);
 }
 
 async function copyReport() {
@@ -400,6 +419,98 @@ async function onHistoryClick(e) {
   $('historyDrawer').classList.add('hidden');
   setBadge($('s1Badge'), 'history', 'idle');
   setBadge($('s2Badge'), 'history', 'idle');
+}
+
+// ---------- Guided 3-minute demo tour (same beats as the judging video) ----------
+const Tour = { active: false, idx: 0, token: 0, t0: 0, tickId: 0 };
+
+function fillSample(mode, i) {
+  setMode(mode);
+  const body = SAMPLES[mode][i].body;
+  $('input').value = body;
+  $('charCount').textContent = `${body.length} chars`;
+}
+
+const TOUR_ACTIONS = {
+  upi: async () => fillSample('scam', 0),
+  analyze1: async () => { await analyze(); },
+  diff: async () => { if (S.last) setRedactMode('both'); },
+  privacy: async () => { $('cloudToggle').checked = false; updateCloudPill(); await analyze(); },
+  fine: async () => {
+    if (firebaseState.rcValues.cloud_stage_enabled) { $('cloudToggle').checked = true; updateCloudPill(); }
+    fillSample('fine', 0);
+    await analyze();
+  },
+  history: async () => { await openHistory(); },
+  rc: async () => { $('historyDrawer').classList.add('hidden'); },
+  close: async () => {},
+};
+
+function startTour() {
+  if (Tour.active) { stopTour(false); return; }
+  if ($('analyzeBtn').disabled) { toast('Wait for the current analysis to finish, then start the tour.'); return; }
+  closeAuthModal();
+  $('historyDrawer').classList.add('hidden');
+  Tour.active = true;
+  Tour.t0 = Date.now();
+  $('tourBar').classList.remove('hidden');
+  $('tourBtn').textContent = '■ Stop demo';
+  clearInterval(Tour.tickId);
+  Tour.tickId = setInterval(tickTourClock, 250);
+  tickTourClock();
+  gotoStep(0);
+}
+
+function tickTourClock() {
+  const el = (Date.now() - Tour.t0) / 1000;
+  $('tourTime').textContent = `${fmtClock(el)} / ${fmtClock(DEMO_BUDGET_S)}`;
+  $('tourTime').classList.toggle('over', el > DEMO_BUDGET_S);
+  $('tourFill').style.width = `${Math.min(100, (el / DEMO_BUDGET_S) * 100)}%`;
+}
+
+function clearSpot() {
+  document.querySelectorAll('.tour-spot').forEach((el) => el.classList.remove('tour-spot'));
+}
+
+function gotoStep(i) {
+  if (!Tour.active) return;
+  Tour.idx = Math.max(0, Math.min(DEMO_STEPS.length - 1, i));
+  Tour.token += 1; // cancels any pending auto-advance
+  runStep(DEMO_STEPS[Tour.idx], Tour.token);
+}
+
+async function runStep(step, token) {
+  $('tourStep').textContent = `Step ${Tour.idx + 1}/${DEMO_STEPS.length}`;
+  $('tourCap').innerHTML = `<strong>${step.title}.</strong> ${step.caption}`;
+  clearSpot();
+  const t0 = Date.now();
+  try { await TOUR_ACTIONS[step.id](); } catch (e) { console.warn('[tour]', step.id, e); }
+  if (!Tour.active || token !== Tour.token) return; // navigated away or stopped
+  if (step.spot) {
+    const el = document.querySelector(step.spot);
+    if (el) {
+      el.classList.add('tour-spot');
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+  if (!$('tourAuto').checked) return;
+  const waitMs = Math.max(3000, step.seconds * 1000 - (Date.now() - t0));
+  await new Promise((r) => setTimeout(r, waitMs));
+  if (!Tour.active || token !== Tour.token || !$('tourAuto').checked) return;
+  if (Tour.idx >= DEMO_STEPS.length - 1) stopTour(true);
+  else { Tour.idx += 1; runStep(DEMO_STEPS[Tour.idx], token); }
+}
+
+function stopTour(done) {
+  if (!Tour.active) return;
+  const elapsed = fmtClock((Date.now() - Tour.t0) / 1000);
+  Tour.active = false;
+  Tour.token += 1;
+  clearInterval(Tour.tickId);
+  clearSpot();
+  $('tourBar').classList.add('hidden');
+  $('tourBtn').textContent = '▶ 3-min demo';
+  if (done) toast(`Demo complete in ${elapsed} — now try your own message.`);
 }
 
 boot();

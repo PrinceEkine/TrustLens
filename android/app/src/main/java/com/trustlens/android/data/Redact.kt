@@ -16,6 +16,27 @@ object Redact {
     private val urlQuery = Regex("""(https?://[^\s?]+)\?[^\s]*""")
 
     data class Scrub(val text: String, val count: Int)
+    data class Span(val start: Int, val end: Int, val type: String)
+
+    /** Match spans of each PII pattern against the ORIGINAL text, skipping
+     *  overlaps (first pattern wins). Powers the redaction diff view. */
+    fun prescrubSpans(input: String): List<Span> {
+        val spans = mutableListOf<Span>()
+        val all = patterns + listOf("url-query" to urlQuery)
+        for ((type, re) in all) {
+            for (m in re.findAll(input)) {
+                val s = m.range.first
+                val e = m.range.last + 1
+                if (spans.none { s < it.end && e > it.start }) spans += Span(s, e, type)
+            }
+        }
+        return spans.sortedBy { it.start }
+    }
+
+    private val maskToken = Regex("""\[[^\][\n]{1,24}\]|•{2,}|…(?=[\s.,;:!?)\]]|$)""")
+
+    /** Ranges of mask tokens ([NAME], •••[phone], ?…) inside redacted text. */
+    fun maskSpans(redacted: String): List<IntRange> = maskToken.findAll(redacted).map { it.range }.toList()
 
     fun prescrub(input: String): Scrub {
         var out = input

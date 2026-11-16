@@ -86,6 +86,41 @@ export function fmtMs(ms) {
   return ms < 1500 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
+export function renderLinkXray(reports) {
+  if (!reports.length) return '';
+  const tone = { bad: 'bad', warn: 'warn', ok: 'safe', info: 'safe' };
+  return `<ul class="links">${reports.map((r) => `<li class="link-card ${r.worst}">
+    <div class="link-host">${icon(r.worst === 'ok' ? 'check' : 'warn', 15)} <strong>${escapeHtml(r.host || r.url)}</strong>
+    <span class="link-risk">${r.risk}/100 link risk</span></div>
+    <div class="link-url">${escapeHtml(r.url)}</div>
+    <ul>${r.findings.map((f) => `<li><span class="flag ${tone[f.level] || 'safe'}">${escapeHtml(f.label)}</span>
+    <span class="muted">${escapeHtml(f.detail)}</span></li>`).join('')}</ul></li>`).join('')}</ul>
+    <p class="muted small">${icon('lock', 13)} Deterministic checks, computed on-device — not an AI verdict.</p>`;
+}
+
+const MASK_RE = /(\[[^\][\n]{1,24}\]|•{2,}|…(?=[\s.,;:!?)\]]|$))/g;
+
+/** Highlight mask tokens ([NAME], •••[phone], ?…) inside redacted text. XSS-safe. */
+export function highlightMasks(redacted) {
+  return escapeHtml(redacted).replace(MASK_RE, '<mark class="mask">$1</mark>');
+}
+
+/** Highlight the original PII spans that were scrubbed. XSS-safe. */
+export function highlightPii(original, spans) {
+  const src = String(original ?? '');
+  const valid = (spans || []).filter((sp) => sp.start >= 0 && sp.end > sp.start && sp.end <= src.length)
+    .sort((a, b) => a.start - b.start);
+  let html = '';
+  let cur = 0;
+  for (const sp of valid) {
+    if (sp.start < cur) continue; // skip overlaps defensively
+    html += escapeHtml(src.slice(cur, sp.start));
+    html += `<mark class="pii" title="scrubbed: ${escapeHtml(sp.type)}">${escapeHtml(src.slice(sp.start, sp.end))}</mark>`;
+    cur = sp.end;
+  }
+  return html + escapeHtml(src.slice(cur));
+}
+
 export function renderHistory(items) {
   if (!items.length) return '<li class="muted">Nothing yet — your redacted analyses will appear here.</li>';
   return items.map((it, i) => {

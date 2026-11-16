@@ -27,6 +27,7 @@
       <span class="pill" id="pillCloud" title="Cloud deep-analysis stage">Cloud: …</span>
       <span class="pill" id="pillAppCheck" title="Firebase App Check attestation">Shield: …</span>
       <button class="btn ghost small" id="authBtn">Sign in</button>
+      <button class="btn ghost small" id="tourBtn" aria-label="Play guided 3-minute demo" title="Guided 3-minute demo — same beats as the judging video">▶ 3-min demo</button>
       <button class="btn ghost small" id="historyBtn" aria-label="Open history">History</button>
     </div>
   </header>
@@ -90,8 +91,21 @@
         <div id="riskWrap"></div>
         <h3>Why it looks this way</h3>
         <div id="tactics"></div>
+        <div id="linkWrap" class="hidden">
+          <h3>Link X-ray <span class="muted small">on-device checks</span></h3>
+          <div id="links"></div>
+        </div>
         <h3>What the cloud saw <button class="btn ghost small" id="redactToggle">show my original</button></h3>
-        <pre class="redacted" id="redactView"></pre>
+        <div id="redactCard">
+          <div id="paneRedacted">
+            <div class="pane-label">Cloud saw — redacted</div>
+            <pre class="redacted" id="redactView"></pre>
+          </div>
+          <div id="paneOriginal" class="hidden">
+            <div class="pane-label">Stayed on device — your original</div>
+            <pre class="redacted" id="originalView"></pre>
+          </div>
+        </div>
         <h3>Deep analysis</h3>
         <div class="markdown" id="deep"></div>
         <div class="result-actions">
@@ -132,6 +146,18 @@
   </div>
 
   <footer><p id="disclaimer"></p></footer>
+  <div class="tourbar hidden" id="tourBar" role="status" aria-live="polite">
+    <span class="tour-step" id="tourStep"></span>
+    <p class="tour-cap" id="tourCap"></p>
+    <span class="tour-time" id="tourTime"></span>
+    <div class="tour-btns">
+      <button class="btn ghost small" id="tourPrev" aria-label="Previous demo step">←</button>
+      <button class="btn ghost small" id="tourNext" aria-label="Next demo step">→</button>
+      <label class="tour-auto"><input type="checkbox" id="tourAuto" checked /> auto</label>
+      <button class="btn ghost small" id="tourStop">Stop</button>
+    </div>
+    <div class="tour-progress"><div id="tourFill"></div></div>
+  </div>
   <div class="toast hidden" id="toast" role="status"></div>
   <script type="module" src="./src/main.js"></script>
 </body>
